@@ -1,59 +1,73 @@
-from rest_framework.decorators import api_view, permission_classes, parser_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from django.core.exceptions import ObjectDoesNotExist
-from django.core.files import File as FileOpen
-import os
+from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.mixins import CreateModelMixin
+from rest_framework import status
+from django.db.models import Q as query_filter_utility
 
-from .models import File, Image
-from .services import query_decrypt,query_image_generator
+from imageService.models import File, Image
+from imageService.serializer import ImageSerializer, FileSerializer
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@parser_classes([MultiPartParser, FormParser])
-def uploadImage(request, *args, **kwargs):
-    image_file = request.data.get('image')
-    image_file_name = image_file.name.split('.')
-    try:
-        public = True
-        file = File(user = request.user, public=public)
-        image = Image(image_url = image_file, file = file)
 
-        image.image_url.name = image_file_name[0] + '-default.' + image_file_name[1]
-        file.name = image_file_name[0]
-        file.save()
-        image.save()
+class FileUploader(CreateModelMixin, ReadOnlyModelViewSet):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    queryset = File.objects.all()
+    serializer_class = FileSerializer
+    lookup_field = 'id'
+    # authentication_classes =
 
-        return Response({"message" : "Successfully done", "data" : {"image" : image.retrieve(request), "file" : file.retrieve()}})
-    except Exception as Error:
-        print(Error)
-        return Response({"message" : "Something Went Wrong!"})
+    def get_file_data(self, request):
+        return {
+            "public": request.data.get('public', False),
+            "user": request.user.id
+        }
 
-@api_view(['GET'])
-def getFiles(request, *args, **kwargs):
-    files = File.objects.all()
-    result = []
-    for x in files:
-        result.append(x.pk)
-    return Response({"message" : "Successfully done", "data" : result})
+    def get_image_data(self, request, file):
+        image_file = request.data.get('image')
+        if not image_file:
+            raise Exception("Please provide an image in the form.")
+        if not file:
+            raise Exception("Something went wrong.")
+        return {
+            "image_url": image_file,
+            "file": file
+        }
 
-@api_view(["GET"])
-def getImage(request, pk, *args, **kwargs):
-    file = File.objects.get(pk=pk)
-    image = Image.objects.get(file=file, query="default")
-    image_query = request.query_params.get('query')
-    try:
-        if image_query:
-            image = Image.objects.get(file=file, query=image_query)
-    except ObjectDoesNotExist as Error:
-        if 'Image matching query does not exist.' in Error.args:
-            (new_image_path, new_image_extension) = query_image_generator(image=image.image_url.path, query=query_decrypt(image_query), query_str=image_query)
-            new_image = Image(file=file, query=image_query)
-            new_image.image_url.save(file.name + "-" + image_query + "." + new_image_extension, FileOpen(open(new_image_path, 'rb')))
-            if os.path.exists(new_image_path):
-                os.remove(new_image_path)
-            new_image.save()
-            image = new_image
-    finally:
-        return Response({"message" : "Successfully done", "data" : image.retrieve(request)})
+    def get_queryset(self):
+        user = self.request.user
+        get_public = self.request.query_params.get('public', False)
+        if user and get_public:
+            return self.queryset.filter(query_filter_utility(public=get_public) | query_filter_utility(user=user.id))
+        elif user and not get_public:
+            return self.queryset.filter(user=user.id)
+        else:
+            return self.queryset.filter(public=True)
+
+    def create(self, request, *args, **kwargs):
+        file_serializer = self.get_serializer(data=self.get_file_data(request))
+        file_serializer.is_valid(raise_exception=True)
+        file_object = file_serializer.create(
+            validated_data=file_serializer.validated_data)
+        try:
+            image_serilizer = ImageSerializer(
+                data=self.get_image_data(request, file=file_object.id))
+            image_serilizer.is_valid()
+            image_object = image_serilizer.create(
+                validated_data=image_serilizer.validated_data)
+        except Exception as exception:
+            file_object.delete()
+            raise exception
+        headers = self.get_success_headers(file_serializer.data)
+        return Response({"image": image_object.retrieve(request), "file": file_object.retrieve()}, status=status.HTTP_201_CREATED, headers=headers)
+
+    def list(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_queryset(), many=True)
+        return Response({"message": "Successfully done", "data": serializer.data})
+
+    def retrieve(self, request, *args, **kwargs):
+        file_instance = self.get_object()
+        image_query = request.query_params.get("query", "default")
+        image = Image.get_image(file=file_instance, query=image_query)
+        return Response({"message": "Successfully done", "data": image.retrieve(request)})

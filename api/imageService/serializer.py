@@ -1,10 +1,21 @@
 from dataclasses import field
 from rest_framework import serializers
-from .models import Image
+from imageService.models import Image, File
 
-class ImageSerializers(serializers.ModelSerializer):
+
+class ImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Image
-        fields = [
-            'id', 'public'
-        ]
+        fields = '__all__' 
+        extra_kwargs = {
+            'id': {'read_only': True}
+        }
+
+
+class FileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = File
+        fields = '__all__' 
+        extra_kwargs = {
+            'id': {'read_only': True}
+        }

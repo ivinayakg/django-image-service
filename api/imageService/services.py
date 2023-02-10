@@ -10,15 +10,15 @@ def query_decrypt(query):
     
     return result
 
-def query_image_generator(image, query, query_str):
+def query_image_generator(image, query, image_name):
     src_image = cv2.imread(image, cv2.IMREAD_UNCHANGED)
-    image_name = image.split('.')
+    image_path = image.split('images/')
+    new_image_name = image_name + '.'+ image_path[1].split('.')[1]
     if 'h' in query and 'w' in query:
         dsize = (int(query.get('w')), int(query.get('h')))
         output = cv2.resize(src=src_image, dsize=dsize)
-    new_image_path = image_name[0]+ '-' + query_str+ '.'+ image_name[1]
-    new_image_extension = image_name[1]
+    new_image_path = image_path[0]+ 'images/' + new_image_name 
     cv2.imwrite(new_image_path, output)
 
-    return (new_image_path, new_image_extension)
+    return (new_image_path, new_image_name)
         

@@ -1,7 +1,11 @@
-from django.urls import path
-from .views import getFiles, getImage, uploadImage
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+
+from imageService.views import FileUploader
+
+router = DefaultRouter()
+router.register(r'v2', FileUploader)
+
 urlpatterns = [
-    path('create/', uploadImage),
-    path('<str:pk>/view/', getImage),
-    path('all/', getFiles),
+    path('', include(router.urls))
 ]
